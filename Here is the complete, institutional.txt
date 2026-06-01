@@ -1,0 +1,402 @@
+Here is the complete, institutional-grade algorithmic framework engineered specifically to evaluate **Domestic Indian Equity Mutual Funds**. 
+
+While the core philosophy remains identical to the International framework, the **thresholds for Cost (TER) and Downside Mitigation are strictly tightened**. Domestic funds do not suffer from the dual-layer FoF fee structure, and domestic large/mid-cap indices inherently carry lower baseline volatility than global tech indices. Therefore, the algorithm demands higher efficiency and lower fees from domestic fund managers.
+
+---
+
+### ⚙️ Phase 1: Data Ingestion & Pre-Processing
+
+**Variables Mapped from Domestic CSV:**
+*   `roll_3y` = `3Y Avg Annual Rolling Return` *(Note: Watch for trailing spaces in CSV headers)*
+*   `cagr_5y` = `CAGR 5Y`
+*   `sharpe` = `Sharpe Ratio`
+*   `vol` = `Volatility`
+*   `alpha` = `Alpha`
+*   `ter` = `Expense Ratio`
+*   `aum` = `AUM` (in Cr)
+
+**Edge-Case Handling:**
+*   **The "Zero" Trap:** New funds (e.g., Tata Capital Markets Index) have `0` in the `CAGR 5Y` column.
+*   **Algorithm Rule:** `IF cagr_5y == 0 THEN flag as "Missing_Long_Term_Data"`. Assign a fixed 15-point penalty for Consistency.
+*   **The Direct vs. Regular Plan Trap:** The algorithm *assumes* the ingestion of **Direct Plan** TERs. If Regular Plan TERs are fed into Module 5, the fund will be unfairly rejected. 
+
+---
+
+### 🧮 Phase 2: The 100-Point Domestic Scoring Engine
+
+#### Module 1: Rolling Return Consistency (Max 30 Points)
+*Objective: Penalize point-to-point CAGR anomalies and reward continuous momentum.*
+*(Identical to International)*
+
+```text
+IF cagr_5y == 0:
+    Score_1 = 15  // Penalty for missing long-term cycle data
+ELSE:
+    Gap = roll_3y - cagr_5y
+    IF Gap > 0:
+        Score_1 = 30  // Accelerating momentum
+    ELSE IF Gap >= -5:
+        Score_1 = 20  // Stable/Slight cooling
+    ELSE IF Gap >= -10:
+        Score_1 = 10  // Moderate cooling
+    ELSE:
+        Score_1 = 5   // Sharp decline/Mean reversion risk
+```
+
+#### Module 2: Risk-Adjusted Efficiency (Max 25 Points)
+*Objective: Measure return generated per unit of total risk taken.*
+*(Identical to International)*
+
+```text
+IF sharpe > 1.0:
+    Score_2 = 25  // Institutional grade
+ELSE IF sharpe >= 0.8:
+    Score_2 = 15  // Strong retail grade
+ELSE:
+    Score_2 = 5   // Poor risk-adjusted efficiency
+```
+
+#### Module 3: Downside Risk Mitigation (Max 20 Points)
+*Objective: Proxy for downside capture. Tightened for domestic equity baselines.*
+
+```text
+IF (vol < 20 AND sharpe > 1.0):
+    Score_3 = 20  // Elite downside protection (e.g., HSBC Midcap)
+ELSE IF (vol < 25 AND sharpe >= 0.8):
+    Score_3 = 12  // Acceptable domestic protection (e.g., DSP TIGER)
+ELSE:
+    Score_3 = 5   // High uncompensated volatility (Fails institutional threshold)
+```
+
+#### Module 4: True Alpha Generation (Max 15 Points)
+*Objective: Isolate the fund manager's actual skill from baseline Nifty/BSE beta.*
+*(Identical to International)*
+
+```text
+IF alpha > 5.0:
+    Score_4 = 15  // Exceptional manager skill
+ELSE IF alpha >= 2.0:
+    Score_4 = 10  // Good manager skill
+ELSE:
+    Score_4 = 5   // No real skill / Pure beta
+```
+
+#### Module 5: Cost & Concentration Drag (Max 10 Points)
+*Objective: Penalize excessive fees. **Strictly tightened for domestic funds** since there is no FoF dual-layer fee excuse.*
+
+```text
+IF (ter < 0.8 AND vol < 20):
+    Score_5 = 10  // Elite (Rewards Index funds & highly efficient active funds)
+ELSE IF (ter < 1.2 AND vol < 25):
+    Score_5 = 5   // Acceptable (Standard active domestic funds)
+ELSE:
+    Score_5 = 0   // Rejected (TER >= 1.2% or Vol >= 25% is unacceptable domestically)
+```
+
+#### Final Aggregation
+```text
+Total_Score = Score_1 + Score_2 + Score_3 + Score_4 + Score_5
+```
+
+---
+
+### 💻 Phase 3: Python Implementation (Pandas)
+
+Here is the exact vectorized Python code to run your domestic CSV through the institutional engine.
+
+```python
+import pandas as pd
+import numpy as np
+
+# Load data (Ensure you are using the Direct Plan dataset)
+df = pd.read_csv('Domestic_Equity_Funds_Direct.csv')
+
+# Clean column names (remove trailing spaces if present in CSV)
+df.columns = df.columns.str.strip()
+
+# 1. Rolling Consistency (30 pts)
+gap = df['3Y Avg Annual Rolling Return'] - df['CAGR 5Y']
+df['Score_1'] = np.select(
+    [df['CAGR 5Y'] == 0, gap > 0, gap >= -5, gap >= -10],
+    [15, 30, 20, 10], 
+    default=5
+)
+
+# 2. Risk-Adjusted Efficiency (25 pts)
+df['Score_2'] = np.select(
+    [df['Sharpe Ratio'] > 1.0, df['Sharpe Ratio'] >= 0.8],
+    [25, 15], 
+    default=5
+)
+
+# 3. Downside Mitigation (20 pts) - Domestic Thresholds
+df['Score_3'] = np.select(
+    [(df['Volatility'] < 20) & (df['Sharpe Ratio'] > 1.0), 
+     (df['Volatility'] < 25) & (df['Sharpe Ratio'] >= 0.8)],
+    [20, 12], 
+    default=5
+)
+
+# 4. True Alpha (15 pts)
+df['Score_4'] = np.select(
+    [df['Alpha'] > 5.0, df['Alpha'] >= 2.0],
+    [15, 10], 
+    default=5
+)
+
+# 5. Cost & Concentration (10 pts) - STRICT Domestic Thresholds
+df['Score_5'] = np.select(
+    [(df['Expense Ratio'] < 0.8) & (df['Volatility'] < 20),
+     (df['Expense Ratio'] < 1.2) & (df['Volatility'] < 25)],
+    [10, 5], 
+    default=0
+)
+
+# Final Score
+df['Total_Score'] = df['Score_1'] + df['Score_2'] + df['Score_3'] + df['Score_4'] + df['Score_5']
+
+# Sort and Display
+df = df.sort_values('Total_Score', ascending=False)
+print(df[['Name', 'Sub Category', 'Total_Score', 'Score_1', 'Score_2', 'Score_3', 'Score_4', 'Score_5']].head(10))
+```
+
+---
+
+### 🏛️ Phase 4: Portfolio Construction & Liquidity Rules
+
+Domestic mid and small-cap funds face severe liquidity constraints during market corrections. The algorithm applies a strict **AUM Liquidity Filter** before finalizing portfolio weights.
+
+| Score Tier | Classification | Portfolio Role | Max Allocation |
+| :--- | :--- | :--- | :--- |
+| **90 - 100** | **Institutional Core** | Unshakeable anchor. Elite risk-adjusted returns + low cost. | 15% - 20% |
+| **75 - 89** | **Strategic Satellite** | High alpha/momentum, minor flaws (e.g., slightly higher TER). | 8% - 12% |
+| **60 - 74** | **Tactical / Thematic** | High return, but penalized for volatility or average Sharpe. | 3% - 5% |
+| **< 60** | **Reject / Avoid** | Fails risk-adjusted thresholds or charges uncompensated fees. | 0% |
+
+#### The Domestic Liquidity Override Rule (AUM Filter)
+*   `IF Category == 'Small Cap' AND AUM < 5000 Cr:` ➔ **Downgrade to Tactical (Max 3%)** due to redemption liquidity risk.
+*   `IF Category == 'Sectoral' AND AUM < 2000 Cr:` ➔ **Downgrade to Tactical (Max 3%)** due to concentrated sector risk.
+
+---
+
+### 📊 Example Execution on Your Domestic Data
+
+Here is how the algorithm processes three distinct domestic funds to prove its strictness:
+
+#### 1. HSBC Midcap Fund (Direct)
+*   **Data:** Roll: 28.24 | 5Y: 20.82 | Sharpe: 1.01 | Vol: 15.73 | Alpha: 5.60 | TER: 0.66
+*   **Logic:** Gap +7.42 (30) | Sharpe > 1 (25) | Vol<20 & Sharpe>1 (20) | Alpha > 5 (15) | TER<0.8 & Vol<20 (10)
+*   **Algorithm Output:** **100 / 100** ➔ *Classification: Institutional Core (Max 20%)*
+
+#### 2. DSP India T.I.G.E.R Fund (Direct)
+*   **Data:** Roll: 31.04 | 5Y: 25.25 | Sharpe: 0.80 | Vol: 14.17 | Alpha: 7.93 | TER: 0.71
+*   **Logic:** Gap +5.79 (30) | Sharpe >= 0.8 (15) | Vol<25 & Sharpe>=0.8 (12) | Alpha > 5 (15) | TER<0.8 & Vol<20 (10)
+*   **Algorithm Output:** **82 / 100** ➔ *Classification: Strategic Satellite (Max 12%)*
+
+#### 3. Union Small Cap Fund (Direct)
+*   **Data:** Roll: 21.59 | 5Y: 19.38 | Sharpe: 0.81 | Vol: 17.46 | Alpha: 7.99 | TER: 0.80
+*   **Logic:** Gap +2.21 (30) | Sharpe >= 0.8 (15) | Fails Vol<20 & Sharpe>1, passes Vol<25 & Sharpe>=0.8 (12) | Alpha > 5 (15) | Fails TER<0.8, passes TER<1.2 & Vol<25 (5)
+*   **Algorithm Output:** **77 / 100** ➔ *Classification: Strategic Satellite (Max 10%)*
+
+#### 4. ICICI Pru Manufacturing Fund (The Rejection)
+*   **Data:** Roll: 29.23 | 5Y: 25.53 | Sharpe: 0.59 | Vol: 15.06 | Alpha: 0.56 | TER: 0.78
+*   **Logic:** Gap +3.70 (30) | Sharpe < 0.8 (5) | Fails Sharpe>0.8 (5) | Alpha < 2.0 (5) | TER<0.8 & Vol<20 (10)
+*   **Algorithm Output:** **55 / 100** ➔ *Classification: Reject. (Despite great rolling returns, the algorithm correctly identifies that the manager is taking on pure market beta (Alpha 0.56) with poor risk-adjusted efficiency (Sharpe 0.59)).*
+
+This domestic algorithm ensures you never overpay for beta, never accept uncompensated volatility, and strictly allocate capital to managers who mathematically prove their worth via Sharpe > 0.8 and Alpha > 2.0.
+
+
+Here is the complete, institutional-grade algorithmic framework designed specifically to evaluate **International Fund of Funds (FoFs)** in India. 
+
+This algorithm is engineered to be directly translated into Python (`pandas`), Excel (`IFS` formulas), or any quantitative screener. It accounts for the structural realities of global investing (higher baseline volatility, dual-layer FoF fees, and missing long-term data for newer thematic funds).
+
+---
+
+### ⚙️ Phase 1: Data Ingestion & Pre-Processing
+Before scoring, the algorithm must clean the raw data and handle edge cases to prevent mathematical errors.
+
+**Variables Mapped from CSV:**
+*   `roll_3y` = `3Y Avg Annual Rolling Return`
+*   `cagr_5y` = `CAGR 5Y`
+*   `sharpe` = `Sharpe Ratio`
+*   `vol` = `Volatility`
+*   `alpha` = `Alpha`
+*   `ter` = `Expense Ratio`
+
+**Edge-Case Handling (Crucial for CSV Data):**
+*   **The "Zero" Trap:** Many newer funds (e.g., Mirae AI & Tech, Navi Nasdaq 100) have `0` in the `CAGR 5Y` column because they haven't existed for 5 years. 
+*   **Algorithm Rule:** `IF cagr_5y == 0 THEN flag as "Missing_Long_Term_Data"`. Do not calculate a fake rolling gap. Assign a fixed neutral/penalty score for Consistency.
+
+---
+
+### 🧮 Phase 2: The 100-Point Scoring Engine
+
+#### Module 1: Rolling Return Consistency (Max 30 Points)
+*Objective: Penalize point-to-point CAGR anomalies and reward continuous momentum.*
+
+```text
+IF cagr_5y == 0:
+    Score_1 = 15  // Institutional penalty for missing long-term cycle data
+ELSE:
+    Gap = roll_3y - cagr_5y
+    IF Gap > 0:
+        Score_1 = 30  // Accelerating momentum
+    ELSE IF Gap >= -5:
+        Score_1 = 20  // Stable/Slight cooling
+    ELSE IF Gap >= -10:
+        Score_1 = 10  // Moderate cooling
+    ELSE:
+        Score_1 = 5   // Sharp decline/Mean reversion risk
+```
+
+#### Module 2: Risk-Adjusted Efficiency (Max 25 Points)
+*Objective: Measure return generated per unit of total risk taken.*
+
+```text
+IF sharpe > 1.0:
+    Score_2 = 25  // Institutional grade
+ELSE IF sharpe >= 0.8:
+    Score_2 = 15  // Strong retail grade
+ELSE:
+    Score_2 = 5   // Poor risk-adjusted efficiency
+```
+
+#### Module 3: Downside Risk Mitigation (Max 20 Points)
+*Objective: Proxy for downside capture. Adjusted for global tech volatility (which naturally runs hotter than domestic equity).*
+
+```text
+IF (vol < 18 AND sharpe > 1.0):
+    Score_3 = 20  // Elite downside protection
+ELSE IF (vol < 24 AND sharpe > 0.8):
+    Score_3 = 12  // Acceptable global equity protection
+ELSE:
+    Score_3 = 5   // High uncompensated volatility
+```
+
+#### Module 4: True Alpha Generation (Max 15 Points)
+*Objective: Isolate the fund manager's actual skill from baseline market beta.*
+
+```text
+IF alpha > 5.0:
+    Score_4 = 15  // Exceptional manager skill
+ELSE IF alpha >= 2.0:
+    Score_4 = 10  // Good manager skill
+ELSE:
+    Score_4 = 5   // No real skill / Pure beta
+```
+
+#### Module 5: Cost & Concentration Drag (Max 10 Points)
+*Objective: Penalize funds that charge excessive fees for volatile bets. Adjusted to accommodate the dual-layer fee structure of active FoFs.*
+
+```text
+IF (ter < 0.8 AND vol < 20):
+    Score_5 = 10  // Elite (Rewards passive/index FoFs)
+ELSE IF (ter < 1.5 AND vol < 25):
+    Score_5 = 5   // Acceptable (Accommodates active FoFs)
+ELSE:
+    Score_5 = 0   // Rejected (Too expensive and/or too volatile)
+```
+
+#### Final Aggregation
+```text
+Total_Score = Score_1 + Score_2 + Score_3 + Score_4 + Score_5
+```
+
+---
+
+### 💻 Phase 3: Python Implementation (Pandas)
+If you are running this on your CSV, here is the exact vectorized Python code to generate the scores instantly.
+
+```python
+import pandas as pd
+import numpy as np
+
+# Load data
+df = pd.read_csv('Top_Equity_Funds_with_Premium_Returns_and_Growth_Plan_1_6_2026 (2).csv')
+
+# 1. Rolling Consistency (30 pts)
+gap = df['3Y Avg Annual Rolling Return '] - df['CAGR 5Y']
+df['Score_1'] = np.select(
+    [df['CAGR 5Y'] == 0, gap > 0, gap >= -5, gap >= -10],
+    [15, 30, 20, 10], 
+    default=5
+)
+
+# 2. Risk-Adjusted Efficiency (25 pts)
+df['Score_2'] = np.select(
+    [df['Sharpe Ratio'] > 1.0, df['Sharpe Ratio'] >= 0.8],
+    [25, 15], 
+    default=5
+)
+
+# 3. Downside Mitigation (20 pts)
+df['Score_3'] = np.select(
+    [(df['Volatility'] < 18) & (df['Sharpe Ratio'] > 1.0), 
+     (df['Volatility'] < 24) & (df['Sharpe Ratio'] >= 0.8)],
+    [20, 12], 
+    default=5
+)
+
+# 4. True Alpha (15 pts)
+df['Score_4'] = np.select(
+    [df['Alpha'] > 5.0, df['Alpha'] >= 2.0],
+    [15, 10], 
+    default=5
+)
+
+# 5. Cost & Concentration (10 pts)
+df['Score_5'] = np.select(
+    [(df['Expense Ratio'] < 0.8) & (df['Volatility'] < 20),
+     (df['Expense Ratio'] < 1.5) & (df['Volatility'] < 25)],
+    [10, 5], 
+    default=0
+)
+
+# Final Score
+df['Total_Score'] = df['Score_1'] + df['Score_2'] + df['Score_3'] + df['Score_4'] + df['Score_5']
+
+# Sort and Display
+df = df.sort_values('Total_Score', ascending=False)
+print(df[['Name', 'Total_Score', 'Score_1', 'Score_2', 'Score_3', 'Score_4', 'Score_5']].head(10))
+```
+
+---
+
+### 🏛️ Phase 4: Portfolio Construction Rules (The Output Logic)
+
+Once the algorithm scores the universe, it categorizes funds into portfolio buckets based on their mathematical profile.
+
+| Score Tier | Classification | Portfolio Role | Max Allocation per Fund |
+| :--- | :--- | :--- | :--- |
+| **90 - 100** | **Institutional Core** | Unshakeable anchor. Elite risk-adjusted returns + low cost. | 10% - 15% |
+| **80 - 89** | **Strategic Satellite** | High alpha or strong momentum, but minor flaws (e.g., slightly higher TER or Vol). | 5% - 10% |
+| **70 - 79** | **Tactical / Thematic** | High return, but penalized for extreme volatility or missing long-term data. | 3% - 5% |
+| **< 70** | **Reject / Avoid** | Fails risk-adjusted thresholds or charges uncompensated fees. | 0% |
+
+#### The SEBI Cap Override Rule (AUM Filter)
+Because international funds in India are subject to the $7B SEBI limit, the algorithm applies a final liquidity filter:
+*   `IF Total_Score >= 80 AND AUM < 100 Cr:` ➔ **Downgrade to Tactical (Max 3%)** due to high risk of sudden SIP closures.
+*   `IF Total_Score >= 80 AND AUM > 1000 Cr:` ➔ **Approve for Core Allocation**.
+
+---
+
+### 📊 Example Execution on Your CSV Data
+
+Here is how the algorithm processes three distinct funds from your provided Knowledge Base to prove its effectiveness:
+
+#### 1. Kotak US Specific Equity Passive FOF
+*   **Data:** Roll: 34.32 | 5Y: 23.86 | Sharpe: 2.69 | Vol: 17.09 | Alpha: 19.15 | TER: 0.24
+*   **Logic:** Gap is +10.46 (30) | Sharpe > 1 (25) | Vol<18 & Sharpe>1 (20) | Alpha > 5 (15) | TER<0.8 & Vol<20 (10)
+*   **Algorithm Output:** **100 / 100** ➔ *Classification: Institutional Core*
+
+#### 2. Mirae Asset NYSE FANG+ ETF FoF
+*   **Data:** Roll: 58.78 | 5Y: 32.55 | Sharpe: 1.80 | Vol: 21.01 | Alpha: 15.18 | TER: 0.03
+*   **Logic:** Gap is +26.23 (30) | Sharpe > 1 (25) | Vol<24 & Sharpe>0.8 (12) | Alpha > 5 (15) | TER<0.8 but Vol>20 (5)
+*   **Algorithm Output:** **87 / 100** ➔ *Classification: Strategic Satellite (Penalized slightly for 21% Volatility)*
+
+#### 3. Edelweiss US Technology Equity FOF
+*   **Data:** Roll: 34.25 | 5Y: 19.30 | Sharpe: 1.86 | Vol: 25.24 | Alpha: 20.56 | TER: 1.48
+*   **Logic:** Gap is +14.95 (30) | Sharpe > 1 (25) | Fails Vol<24 (5) | Alpha > 5 (15) | Fails Vol<25 (0)
+*   **Algorithm Output:** **75 / 100** ➔ *Classification: Tactical / Thematic (Heavily penalized for 25.24% Volatility)*
+
+This algorithm removes human emotion, ignores marketing narratives, and strictly allocates capital based on mathematical compensation for risk, cost, and consistency.
